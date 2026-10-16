@@ -8,6 +8,7 @@
 
 사용 예시 (ai_agent 폴더에서 실행):
     python script/fetch_email.py --since 2026-08-03 --include-read
+    python script/fetch_email.py --since "2026-08-02 13:00" --until "2026-08-03 09:00"
 """
 
 import argparse
@@ -90,7 +91,28 @@ def extract_body(message):
     return body
 
 
-def fetch_account(label, user, password, server, since, include_read):
+def parse_time(value):
+    """'YYYY-MM-DD' 또는 'YYYY-MM-DD HH:MM' 형식을 datetime으로 바꿉니다."""
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            pass
+    raise argparse.ArgumentTypeError(f"날짜 형식 오류: {value} (예: 2026-08-03 또는 '2026-08-03 13:00')")
+
+
+def received_at(message):
+    """메일 Date 헤더를 로컬 시간(naive datetime)으로 반환합니다. 실패 시 None."""
+    try:
+        parsed = parsedate_to_datetime(message.get("Date"))
+    except Exception:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def fetch_account(label, user, password, server, since, until, include_read):
     """한 계정의 INBOX에서 조건에 맞는 메일을 가져와 출력합니다."""
     print(f"\n========== ({label}) ==========")
     try:
@@ -108,26 +130,35 @@ def fetch_account(label, user, password, server, since, include_read):
         status, data = conn.uid("search", None, *criteria)
         uids = data[0].split() if status == "OK" and data[0] else []
 
-        if not uids:
-            print("받은 메일 없음")
-            return
-
-        print(f"총 {len(uids)}건")
-        for index, uid in enumerate(uids, start=1):
+        # IMAP SINCE는 날짜 단위라서, 시:분 구간은 Date 헤더로 한 번 더 거릅니다.
+        messages = []
+        failed = []
+        for uid in uids:
             status, msg_data = conn.uid("fetch", uid, "(FLAGS BODY.PEEK[])")
             if status != "OK" or not msg_data or msg_data[0] is None:
-                print(f"\n--- [{index}] 가져오기 실패 (UID {uid.decode()}) ---")
+                failed.append(uid.decode())
                 continue
             flags = msg_data[0][0].decode(errors="replace")
             message = email.message_from_bytes(msg_data[0][1])
-            try:
-                received = parsedate_to_datetime(message.get("Date")).strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                received = "[날짜 확인 불가]"
+            received = received_at(message)
+            if received is not None and (received < since or (until and received >= until)):
+                continue
+            messages.append((received, flags, message))
+
+        for uid in failed:
+            print(f"[가져오기 실패] UID {uid}")
+
+        if not messages:
+            print("받은 메일 없음")
+            return
+
+        print(f"총 {len(messages)}건")
+        for index, (received, flags, message) in enumerate(messages, start=1):
+            received_text = received.strftime("%Y-%m-%d %H:%M") if received else "[날짜 확인 불가]"
             read_state = "읽음" if "\\Seen" in flags else "안읽음"
 
             print(f"\n--- [{index}] ---")
-            print(f"수신일시: {received} ({read_state})")
+            print(f"수신일시: {received_text} ({read_state})")
             print(f"보낸이: {decode_text(message.get('From'))}")
             print(f"제목: {decode_text(message.get('Subject'))}")
             print(f"본문: {extract_body(message)}")
@@ -141,14 +172,17 @@ def fetch_account(label, user, password, server, since, include_read):
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="메일 수집 (skill_email.md 요약용)")
-    parser.add_argument("--since", required=True, help="조회 시작일 (예: 2026-08-03)")
+    parser.add_argument("--since", required=True, type=parse_time,
+                        help="조회 시작 (예: 2026-08-03 또는 '2026-08-03 13:00')")
+    parser.add_argument("--until", type=parse_time,
+                        help="조회 종료, 이 시각 미만까지 (생략 시 현재까지)")
     parser.add_argument("--include-read", action="store_true", help="읽은 메일도 포함")
     args = parser.parse_args()
 
-    since = datetime.strptime(args.since, "%Y-%m-%d")
+    since, until = args.since, args.until
     env = load_env(ENV_PATH)
 
-    print(f"수집 구간: {since:%Y-%m-%d} 00:00 ~ {datetime.now():%Y-%m-%d %H:%M}")
+    print(f"수집 구간: {since:%Y-%m-%d %H:%M} ~ {(until or datetime.now()):%Y-%m-%d %H:%M}")
     print(f"읽은 메일 포함: {'예' if args.include_read else '아니오 (안읽음만)'}")
 
     if not env:
@@ -162,7 +196,7 @@ def main():
             print(f"[설정 없음] {user_key} 또는 {pw_key} 값이 비어 있어 건너뜁니다.")
             continue
         server = env.get(server_key) or default_server
-        fetch_account(label, user, password, server, since, args.include_read)
+        fetch_account(label, user, password, server, since, until, args.include_read)
 
 
 if __name__ == "__main__":
