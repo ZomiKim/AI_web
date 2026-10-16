@@ -1,0 +1,62 @@
+# ===== 민감 정보 (API 키, 비밀번호 등) =====
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
+
+# 비서 계정 설정 폴더는 통째로 제외 (예시 파일만 허용)
+ai_agent/config/*
+!ai_agent/config/*.example
+!ai_agent/config/.gitkeep
+
+# 비서 작업 결과물(메일 요약, 정산 자료 등)은 제외, 지침 파일(skill_*.md)만 허용
+ai_agent/workspace/**
+!ai_agent/workspace/**/
+!ai_agent/workspace/**/skill_*.md
+!ai_agent/workspace/**/.gitkeep
+
+# 인증서·키·OAuth 토큰 파일 (Google API 연동 시 생성되는 파일 포함)
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+token.json
+client_secret*.json
+service-account*.json
+*.secret
+secrets/
+
+# ===== Node / npm 생성물 =====
+node_modules/
+.npm-cache/
+dist/
+dist-ssr/
+*.local
+
+# ===== 로그 =====
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ===== Claude Code 개인 설정 (공유용 settings.json은 포함) =====
+.claude/settings.local.json
+
+# ===== 에디터 / OS =====
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
